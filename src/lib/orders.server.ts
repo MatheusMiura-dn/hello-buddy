@@ -5,6 +5,7 @@ import { z } from "zod";
 
 const CODE_ALPHABET = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789";
 const ORDER_CODE_LENGTH = 6;
+const orderStatuses = ["pending", "processing", "shipped", "completed", "cancelled"] as const;
 
 function getDb() {
   const url = process.env.TURSO_DATABASE_URL;
@@ -58,13 +59,38 @@ export const createOrder = createServerFn({ method: "POST" })
     throw new Error("Não foi possível gerar um código único para o pedido.");
   });
 
-export const findOrder = createServerFn({ method: "GET" })
-  .inputValidator(z.object({ code: z.string().regex(/^TA-[A-Z0-9]{6}$/), adminToken: z.string().min(1) }))
+const adminInput = z.object({ adminToken: z.string().min(1) });
+const codeInput = z.object({ code: z.string().regex(/^TA-[A-Z0-9]{6}$/), adminToken: z.string().min(1) });
+
+function assertAdmin(token: string) {
+  if (!process.env.ADMIN_PANEL_TOKEN || token !== process.env.ADMIN_PANEL_TOKEN) throw new Error("Não autorizado.");
+}
+
+export const listOrders = createServerFn({ method: "GET" })
+  .inputValidator(adminInput)
   .handler(async ({ data }) => {
-    if (!process.env.ADMIN_PANEL_TOKEN || data.adminToken !== process.env.ADMIN_PANEL_TOKEN) throw new Error("Não autorizado.");
+    assertAdmin(data.adminToken);
+    const db = await ensureSchema();
+    const result = await db.execute({ sql: `SELECT code, total_cents, customer_name, customer_email, status, created_at FROM orders ORDER BY datetime(created_at) DESC`, args: [] });
+    return result.rows;
+  });
+
+export const findOrder = createServerFn({ method: "GET" })
+  .inputValidator(codeInput)
+  .handler(async ({ data }) => {
+    assertAdmin(data.adminToken);
     const db = await ensureSchema();
     const order = await db.execute({ sql: "SELECT code, total_cents, customer_name, customer_email, status, created_at FROM orders WHERE code = ?", args: [data.code] });
     if (!order.rows[0]) return null;
     const items = await db.execute({ sql: "SELECT product_id, product_name, quantity, unit_price_cents FROM order_items WHERE order_code = ? ORDER BY id", args: [data.code] });
     return { ...order.rows[0], items: items.rows };
+  });
+
+export const updateOrderStatus = createServerFn({ method: "POST" })
+  .inputValidator(z.object({ code: z.string().regex(/^TA-[A-Z0-9]{6}$/), status: z.enum(orderStatuses), adminToken: z.string().min(1) }))
+  .handler(async ({ data }) => {
+    assertAdmin(data.adminToken);
+    const db = await ensureSchema();
+    await db.execute({ sql: "UPDATE orders SET status = ? WHERE code = ?", args: [data.status, data.code] });
+    return { ok: true };
   });

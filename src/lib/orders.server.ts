@@ -30,16 +30,14 @@ function randomOrderCode() {
   return code;
 }
 
-const createOrderInput = z.object({
-  items: z.array(z.object({ productId: z.string().min(1), productName: z.string().min(1), quantity: z.number().int().positive(), unitPriceCents: z.number().int().nonnegative() })).min(1),
-  totalCents: z.number().int().positive(),
-  customerName: z.string().trim().min(1).max(120).optional(),
-  customerEmail: z.string().email().max(180).optional(),
-});
+const itemInput = z.object({ productId: z.string().min(1), productName: z.string().min(1), quantity: z.number().int().positive().max(99), unitPriceCents: z.number().int().nonnegative() });
+const createOrderInput = z.object({ items: z.array(itemInput).min(1).max(50), totalCents: z.number().int().positive(), customerName: z.string().trim().min(1).max(120).optional(), customerEmail: z.string().email().max(180).optional() });
 
 export const createOrder = createServerFn({ method: "POST" })
   .inputValidator(createOrderInput)
   .handler(async ({ data }) => {
+    const calculatedTotal = data.items.reduce((sum, item) => sum + item.quantity * item.unitPriceCents, 0);
+    if (calculatedTotal !== data.totalCents) throw new Error("Total do pedido inválido.");
     const db = await ensureSchema();
     for (let attempt = 0; attempt < 10; attempt += 1) {
       const code = randomOrderCode();
@@ -59,38 +57,42 @@ export const createOrder = createServerFn({ method: "POST" })
     throw new Error("Não foi possível gerar um código único para o pedido.");
   });
 
-const adminInput = z.object({ adminToken: z.string().min(1) });
+const adminInput = z.object({ adminToken: z.string().min(1));
 const codeInput = z.object({ code: z.string().regex(/^TA-[A-Z0-9]{6}$/), adminToken: z.string().min(1) });
+const publicCodeInput = z.object({ code: z.string().regex(/^TA-[A-Z0-9]{6}$/) });
 
 function assertAdmin(token: string) {
   if (!process.env.ADMIN_PANEL_TOKEN || token !== process.env.ADMIN_PANEL_TOKEN) throw new Error("Não autorizado.");
 }
 
-export const listOrders = createServerFn({ method: "GET" })
-  .inputValidator(adminInput)
-  .handler(async ({ data }) => {
-    assertAdmin(data.adminToken);
-    const db = await ensureSchema();
-    const result = await db.execute({ sql: `SELECT code, total_cents, customer_name, customer_email, status, created_at FROM orders ORDER BY datetime(created_at) DESC`, args: [] });
-    return result.rows;
-  });
+async function getOrder(db: ReturnType<typeof createClient>, code: string) {
+  const order = await db.execute({ sql: "SELECT code, total_cents, customer_name, customer_email, status, created_at FROM orders WHERE code = ?", args: [code] });
+  if (!order.rows[0]) return null;
+  const items = await db.execute({ sql: "SELECT product_id, product_name, quantity, unit_price_cents FROM order_items WHERE order_code = ? ORDER BY id", args: [code] });
+  return { ...order.rows[0], items: items.rows };
+}
 
-export const findOrder = createServerFn({ method: "GET" })
-  .inputValidator(codeInput)
-  .handler(async ({ data }) => {
-    assertAdmin(data.adminToken);
-    const db = await ensureSchema();
-    const order = await db.execute({ sql: "SELECT code, total_cents, customer_name, customer_email, status, created_at FROM orders WHERE code = ?", args: [data.code] });
-    if (!order.rows[0]) return null;
-    const items = await db.execute({ sql: "SELECT product_id, product_name, quantity, unit_price_cents FROM order_items WHERE order_code = ? ORDER BY id", args: [data.code] });
-    return { ...order.rows[0], items: items.rows };
-  });
+export const listOrders = createServerFn({ method: "GET" }).inputValidator(adminInput).handler(async ({ data }) => {
+  assertAdmin(data.adminToken);
+  const db = await ensureSchema();
+  const result = await db.execute({ sql: `SELECT code, total_cents, customer_name, customer_email, status, created_at FROM orders ORDER BY datetime(created_at) DESC`, args: [] });
+  return result.rows;
+});
 
-export const updateOrderStatus = createServerFn({ method: "POST" })
-  .inputValidator(z.object({ code: z.string().regex(/^TA-[A-Z0-9]{6}$/), status: z.enum(orderStatuses), adminToken: z.string().min(1) }))
-  .handler(async ({ data }) => {
-    assertAdmin(data.adminToken);
-    const db = await ensureSchema();
-    await db.execute({ sql: "UPDATE orders SET status = ? WHERE code = ?", args: [data.status, data.code] });
-    return { ok: true };
-  });
+export const findOrder = createServerFn({ method: "GET" }).inputValidator(codeInput).handler(async ({ data }) => {
+  assertAdmin(data.adminToken);
+  return getOrder(await ensureSchema(), data.code);
+});
+
+export const findPublicOrder = createServerFn({ method: "GET" }).inputValidator(publicCodeInput).handler(async ({ data }) => {
+  const order = await getOrder(await ensureSchema(), data.code);
+  if (!order) return null;
+  return { ...order, customer_email: order.customer_email ? String(order.customer_email).replace(/(^.).*(@.*$)/, "$1••••$2") : null };
+});
+
+export const updateOrderStatus = createServerFn({ method: "POST" }).inputValidator(z.object({ code: z.string().regex(/^TA-[A-Z0-9]{6}$/), status: z.enum(orderStatuses), adminToken: z.string().min(1) })).handler(async ({ data }) => {
+  assertAdmin(data.adminToken);
+  const db = await ensureSchema();
+  await db.execute({ sql: "UPDATE orders SET status = ? WHERE code = ?", args: [data.status, data.code] });
+  return { ok: true };
+});

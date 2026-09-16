@@ -1,4 +1,4 @@
-import { useMemo, useState } from "react";
+import { useMemo, useState, type FormEvent } from "react";
 import { ChevronDown, Search, ShoppingBag, SlidersHorizontal, Star, X } from "lucide-react";
 import { createFileRoute } from "@tanstack/react-router";
 import { products, type Category, type Product } from "../data/products";
@@ -6,6 +6,7 @@ import { ProductCard } from "../components/ProductCard";
 import { CartDrawer } from "../components/CartDrawer";
 import { useCart } from "../hooks/useCart";
 import { createOrder } from "../lib/orders.server";
+import "../archive.css";
 
 export const Route = createFileRoute("/")({ component: Index });
 const categories: Category[] = ["Todos", "Camisas", "Calças", "Casacos", "Acessórios"];
@@ -43,7 +44,7 @@ function Index() {
   const addProduct = (product: Product) => { add(product); setCartOpen(true); };
   const startCheckout = () => { if (items.length) { setCartOpen(false); setCheckoutOpen(true); } };
 
-  async function checkout(event: React.FormEvent) {
+  async function checkout(event: FormEvent) {
     event.preventDefault();
     if (!items.length || checkoutBusy || !customerName.trim() || !customerEmail.trim()) return;
     setCheckoutBusy(true);

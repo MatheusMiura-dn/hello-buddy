@@ -9,9 +9,11 @@ type Props = {
   onClose: () => void;
   onChange: (id: string, delta: number) => void;
   onRemove: (id: string) => void;
+  onCheckout: () => void;
+  checkoutBusy: boolean;
 };
 
-export function CartDrawer({ items, open, onClose, onChange, onRemove }: Props) {
+export function CartDrawer({ items, open, onClose, onChange, onRemove, onCheckout, checkoutBusy }: Props) {
   const total = items.reduce((sum, item) => sum + item.price * item.quantity, 0);
   if (!open) return null;
 
@@ -36,7 +38,7 @@ export function CartDrawer({ items, open, onClose, onChange, onRemove }: Props) 
             </div>
           ))}
         </div>
-        {items.length > 0 && <footer className="drawer-footer"><div><span>Total</span><strong>R$ {total.toFixed(2).replace('.', ',')}</strong></div><button className="checkout-button" onClick={() => alert("Checkout demonstrativo. Conecte um gateway de pagamento para receber pedidos reais.")}>Finalizar pedido</button><small>Pagamento seguro • Envio para todo o Brasil</small></footer>}
+        {items.length > 0 && <footer className="drawer-footer"><div><span>Total</span><strong>R$ {total.toFixed(2).replace('.', ',')}</strong></div><button className="checkout-button" disabled={checkoutBusy} onClick={onCheckout}>{checkoutBusy ? "Gerando pedido..." : "Finalizar pedido"}</button><small>Um código único será gerado para este pedido.</small></footer>}
       </aside>
     </div>
   );

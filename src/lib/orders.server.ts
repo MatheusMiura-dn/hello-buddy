@@ -33,31 +33,29 @@ function randomOrderCode() {
 const itemInput = z.object({ productId: z.string().min(1), productName: z.string().min(1), quantity: z.number().int().positive().max(99), unitPriceCents: z.number().int().nonnegative() });
 const createOrderInput = z.object({ items: z.array(itemInput).min(1).max(50), totalCents: z.number().int().positive(), customerName: z.string().trim().min(1).max(120).optional(), customerEmail: z.string().email().max(180).optional() });
 
-export const createOrder = createServerFn({ method: "POST" })
-  .inputValidator(createOrderInput)
-  .handler(async ({ data }) => {
-    const calculatedTotal = data.items.reduce((sum, item) => sum + item.quantity * item.unitPriceCents, 0);
-    if (calculatedTotal !== data.totalCents) throw new Error("Total do pedido inválido.");
-    const db = await ensureSchema();
-    for (let attempt = 0; attempt < 10; attempt += 1) {
-      const code = randomOrderCode();
-      const now = new Date().toISOString();
-      try {
-        await db.execute({ sql: "INSERT INTO order_code_reservations (code, created_at) VALUES (?, ?)", args: [code, now] });
-        await db.batch([
-          { sql: `INSERT INTO orders (code, total_cents, customer_name, customer_email, status, created_at) VALUES (?, ?, ?, ?, 'pending', ?)`, args: [code, data.totalCents, data.customerName ?? null, data.customerEmail ?? null, now] },
-          ...data.items.map((item) => ({ sql: `INSERT INTO order_items (order_code, product_id, product_name, quantity, unit_price_cents) VALUES (?, ?, ?, ?, ?)`, args: [code, item.productId, item.productName, item.quantity, item.unitPriceCents] })),
-        ]);
-        return { code };
-      } catch (error) {
-        if (String(error).toLowerCase().includes("unique") || String(error).toLowerCase().includes("constraint")) continue;
-        throw error;
-      }
+export const createOrder = createServerFn({ method: "POST" }).inputValidator(createOrderInput).handler(async ({ data }) => {
+  const calculatedTotal = data.items.reduce((sum, item) => sum + item.quantity * item.unitPriceCents, 0);
+  if (calculatedTotal !== data.totalCents) throw new Error("Total do pedido inválido.");
+  const db = await ensureSchema();
+  for (let attempt = 0; attempt < 10; attempt += 1) {
+    const code = randomOrderCode();
+    const now = new Date().toISOString();
+    try {
+      await db.execute({ sql: "INSERT INTO order_code_reservations (code, created_at) VALUES (?, ?)", args: [code, now] });
+      await db.batch([
+        { sql: `INSERT INTO orders (code, total_cents, customer_name, customer_email, status, created_at) VALUES (?, ?, ?, ?, 'pending', ?)`, args: [code, data.totalCents, data.customerName ?? null, data.customerEmail ?? null, now] },
+        ...data.items.map((item) => ({ sql: `INSERT INTO order_items (order_code, product_id, product_name, quantity, unit_price_cents) VALUES (?, ?, ?, ?, ?)`, args: [code, item.productId, item.productName, item.quantity, item.unitPriceCents] })),
+      ]);
+      return { code };
+    } catch (error) {
+      if (String(error).toLowerCase().includes("unique") || String(error).toLowerCase().includes("constraint")) continue;
+      throw error;
     }
-    throw new Error("Não foi possível gerar um código único para o pedido.");
-  });
+  }
+  throw new Error("Não foi possível gerar um código único para o pedido.");
+});
 
-const adminInput = z.object({ adminToken: z.string().min(1));
+const adminInput = z.object({ adminToken: z.string().min(1) });
 const codeInput = z.object({ code: z.string().regex(/^TA-[A-Z0-9]{6}$/), adminToken: z.string().min(1) });
 const publicCodeInput = z.object({ code: z.string().regex(/^TA-[A-Z0-9]{6}$/) });
 

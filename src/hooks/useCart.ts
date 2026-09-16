@@ -14,14 +14,24 @@ export function useCart() {
   function add(product: Product) {
     setItems((current) => {
       const found = current.find((item) => item.id === product.id);
-      return found ? current.map((item) => item.id === product.id ? { ...item, quantity: item.quantity + 1 } : item) : [...current, { ...product, quantity: 1 }];
+      return found
+        ? current.map((item) => item.id === product.id ? { ...item, quantity: item.quantity + 1 } : item)
+        : [...current, { ...product, quantity: 1 }];
     });
   }
+
   function change(id: string, delta: number) {
     setItems((current) => current.map((item) => item.id === id ? { ...item, quantity: item.quantity + delta } : item).filter((item) => item.quantity > 0));
   }
-  function remove(id: string) { setItems((current) => current.filter((item) => item.id !== id)); }
+
+  function remove(id: string) {
+    setItems((current) => current.filter((item) => item.id !== id));
+  }
+
+  function clear() {
+    setItems([]);
+  }
 
   const count = useMemo(() => items.reduce((sum, item) => sum + item.quantity, 0), [items]);
-  return { items, add, change, remove, count };
+  return { items, add, change, remove, clear, count };
 }

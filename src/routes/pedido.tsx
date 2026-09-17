@@ -1,7 +1,7 @@
 import { useState } from "react";
 import { createFileRoute } from "@tanstack/react-router";
 import { Search, ArrowLeft, Package, User, Mail } from "lucide-react";
-import { findPublicOrder } from "../lib/orders.server";
+import { findPublicOrder } from "../lib/orders.functions";
 import "../archive.css";
 import "../lookup.css";
 

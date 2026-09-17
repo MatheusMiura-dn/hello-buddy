@@ -1,11 +1,17 @@
 import { createClient } from "@libsql/client/web";
 import { randomInt } from "node:crypto";
-import { createServerFn } from "@tanstack/react-start";
 import { z } from "zod";
 
 const CODE_ALPHABET = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789";
 const ORDER_CODE_LENGTH = 6;
 const orderStatuses = ["pending", "processing", "shipped", "completed", "cancelled"] as const;
+
+export const itemInput = z.object({ productId: z.string().min(1), productName: z.string().min(1), quantity: z.number().int().positive().max(99), unitPriceCents: z.number().int().nonnegative() });
+export const createOrderInput = z.object({ items: z.array(itemInput).min(1).max(50), totalCents: z.number().int().positive(), customerName: z.string().trim().min(1).max(120).optional(), customerEmail: z.string().email().max(180).optional() });
+export const adminInput = z.object({ adminToken: z.string().min(1) });
+export const codeInput = z.object({ code: z.string().regex(/^TA-[A-Z0-9]{6}$/), adminToken: z.string().min(1) });
+export const publicCodeInput = z.object({ code: z.string().regex(/^TA-[A-Z0-9]{6}$/) });
+export const updateOrderInput = z.object({ code: z.string().regex(/^TA-[A-Z0-9]{6}$/), status: z.enum(orderStatuses), adminToken: z.string().min(1) });
 
 function getDb() {
   const url = process.env.TURSO_DATABASE_URL;
@@ -30,10 +36,7 @@ function randomOrderCode() {
   return code;
 }
 
-const itemInput = z.object({ productId: z.string().min(1), productName: z.string().min(1), quantity: z.number().int().positive().max(99), unitPriceCents: z.number().int().nonnegative() });
-const createOrderInput = z.object({ items: z.array(itemInput).min(1).max(50), totalCents: z.number().int().positive(), customerName: z.string().trim().min(1).max(120).optional(), customerEmail: z.string().email().max(180).optional() });
-
-export const createOrder = createServerFn({ method: "POST" }).inputValidator(createOrderInput).handler(async ({ data }) => {
+export async function createOrderServer(data: z.infer<typeof createOrderInput>) {
   const calculatedTotal = data.items.reduce((sum, item) => sum + item.quantity * item.unitPriceCents, 0);
   if (calculatedTotal !== data.totalCents) throw new Error("Total do pedido inválido.");
   const db = await ensureSchema();
@@ -53,11 +56,7 @@ export const createOrder = createServerFn({ method: "POST" }).inputValidator(cre
     }
   }
   throw new Error("Não foi possível gerar um código único para o pedido.");
-});
-
-const adminInput = z.object({ adminToken: z.string().min(1) });
-const codeInput = z.object({ code: z.string().regex(/^TA-[A-Z0-9]{6}$/), adminToken: z.string().min(1) });
-const publicCodeInput = z.object({ code: z.string().regex(/^TA-[A-Z0-9]{6}$/) });
+}
 
 function assertAdmin(token: string) {
   if (!process.env.ADMIN_PANEL_TOKEN || token !== process.env.ADMIN_PANEL_TOKEN) throw new Error("Não autorizado.");
@@ -70,27 +69,27 @@ async function getOrder(db: ReturnType<typeof createClient>, code: string) {
   return { ...order.rows[0], items: items.rows };
 }
 
-export const listOrders = createServerFn({ method: "GET" }).inputValidator(adminInput).handler(async ({ data }) => {
+export async function listOrdersServer(data: z.infer<typeof adminInput>) {
   assertAdmin(data.adminToken);
   const db = await ensureSchema();
   const result = await db.execute({ sql: `SELECT code, total_cents, customer_name, customer_email, status, created_at FROM orders ORDER BY datetime(created_at) DESC`, args: [] });
   return result.rows;
-});
+}
 
-export const findOrder = createServerFn({ method: "GET" }).inputValidator(codeInput).handler(async ({ data }) => {
+export async function findOrderServer(data: z.infer<typeof codeInput>) {
   assertAdmin(data.adminToken);
   return getOrder(await ensureSchema(), data.code);
-});
+}
 
-export const findPublicOrder = createServerFn({ method: "GET" }).inputValidator(publicCodeInput).handler(async ({ data }) => {
+export async function findPublicOrderServer(data: z.infer<typeof publicCodeInput>) {
   const order = await getOrder(await ensureSchema(), data.code);
   if (!order) return null;
   return { ...order, customer_email: order.customer_email ? String(order.customer_email).replace(/(^.).*(@.*$)/, "$1••••$2") : null };
-});
+}
 
-export const updateOrderStatus = createServerFn({ method: "POST" }).inputValidator(z.object({ code: z.string().regex(/^TA-[A-Z0-9]{6}$/), status: z.enum(orderStatuses), adminToken: z.string().min(1) })).handler(async ({ data }) => {
+export async function updateOrderStatusServer(data: z.infer<typeof updateOrderInput>) {
   assertAdmin(data.adminToken);
   const db = await ensureSchema();
   await db.execute({ sql: "UPDATE orders SET status = ? WHERE code = ?", args: [data.status, data.code] });
   return { ok: true };
-});
+}
